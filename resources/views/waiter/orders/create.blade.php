@@ -1,15 +1,19 @@
 @extends('layouts.app')
 
 @section('content')
-<div class="container">
+<div class="container" x-data="orderApp()">
     <h2>Buat Pesanan</h2>
 
-    <form id="orderForm">
+    <form id="orderForm" @submit.prevent="submitOrder">
         @csrf
         <div class="mb-3">
             <label for="menuSearch">Cari Menu:</label>
-            <input type="text" id="menuSearch" class="form-control" placeholder="Ketik nama menu..." autocomplete="off">
-            <ul id="menuList" class="list-group mt-2"></ul>
+            <input type="text" id="menuSearch" x-model="searchKeyword" @input="filterMenus" @keydown.down="moveDown" @keydown.up="moveUp" @keydown.enter="selectMenu" class="form-control" placeholder="Ketik nama menu..." autocomplete="off">
+            <ul id="menuList" class="list-group mt-2">
+                <template x-for="(menu, index) in filteredMenus" :key="menu.id">
+                    <li class="list-group-item" :class="{ 'active': highlightedIndex === index }" @click="addMenuToOrder(menu)" x-text="`${menu.name} - Rp${menu.price}`"></li>
+                </template>
+            </ul>
         </div>
 
         <h4>Daftar Pesanan</h4>
@@ -21,7 +25,19 @@
                     <th>Aksi</th>
                 </tr>
             </thead>
-            <tbody id="orderItems"></tbody>
+            <tbody id="orderItems">
+                <template x-for="(item, index) in selectedMenus" :key="item.id">
+                    <tr :class="{ 'table-active': selectedRowIndex === index, 'table-primary': editingRowIndex === index }">
+                        <td x-text="item.name"></td>
+                        <td>
+                            <input type="number" x-model="item.quantity" min="1" class="form-control qty-input" :disabled="editingRowIndex !== index">
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-danger btn-sm" @click="removeItem(index)">Hapus</button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
         </table>
 
         <button type="submit" class="btn btn-primary">Konfirmasi Pesanan</button>
@@ -29,147 +45,92 @@
 </div>
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
-    let menus = @json($menus);
-    let selectedMenus = [];
-    let currentFocus = -1;
-    let isEditingQuantity = false; // Mode edit quantity
+document.addEventListener('alpine:init', () => {
+    Alpine.data('orderApp', () => ({
+        menus: @json($menus), // Data menu dari backend
+        searchKeyword: '',
+        filteredMenus: [],
+        selectedMenus: [],
+        highlightedIndex: -1, // Indeks menu yang di-highlight
+        selectedRowIndex: -1, // Indeks baris yang dipilih di daftar pesanan
+        editingRowIndex: -1, // Indeks baris yang sedang diedit
 
-    document.getElementById("menuSearch").addEventListener("input", function () {
-        let keyword = this.value.toLowerCase();
-        let list = document.getElementById("menuList");
-        list.innerHTML = "";
+        init() {
+            this.filterMenus(); // Filter menu saat pertama kali load
+        },
 
-        if (keyword.length > 1) {
-            let filteredMenus = menus.filter(menu => menu.name.toLowerCase().includes(keyword));
-            filteredMenus.forEach((menu, index) => {
-                let item = document.createElement("li");
-                item.textContent = `${menu.name} - Rp${menu.price}`;
-                item.classList.add("list-group-item");
-                item.addEventListener("click", function () {
-                    addMenuToOrder(menu);
-                });
-                list.appendChild(item);
+        // Fungsi untuk memfilter menu berdasarkan kata kunci
+        filterMenus() {
+            if (this.searchKeyword.length > 1) {
+                this.filteredMenus = this.menus.filter(menu =>
+                    menu.name.toLowerCase().includes(this.searchKeyword.toLowerCase())
+                );
+            } else {
+                this.filteredMenus = [];
+            }
+            this.highlightedIndex = -1; // Reset highlight
+        },
+
+        // Fungsi untuk menambahkan menu ke daftar pesanan
+        addMenuToOrder(menu) {
+            if (this.selectedMenus.some(m => m.id === menu.id)) return;
+
+            this.selectedMenus.push({
+                id: menu.id,
+                name: menu.name,
+                quantity: 1
             });
+
+            this.searchKeyword = '';
+            this.filteredMenus = [];
+        },
+
+        // Fungsi untuk menghapus item dari daftar pesanan
+        removeItem(index) {
+            this.selectedMenus.splice(index, 1);
+            if (this.selectedRowIndex === index) this.selectedRowIndex = -1;
+            if (this.editingRowIndex === index) this.editingRowIndex = -1;
+        },
+
+        // Navigasi ke bawah di daftar menu
+        moveDown() {
+            if (this.highlightedIndex < this.filteredMenus.length - 1) {
+                this.highlightedIndex++;
+            }
+        },
+
+        // Navigasi ke atas di daftar menu
+        moveUp() {
+            if (this.highlightedIndex > 0) {
+                this.highlightedIndex--;
+            }
+        },
+
+        // Memilih menu dengan tombol Enter
+        selectMenu() {
+            if (this.highlightedIndex >= 0 && this.highlightedIndex < this.filteredMenus.length) {
+                this.addMenuToOrder(this.filteredMenus[this.highlightedIndex]);
+            }
+        },
+
+        // Submit pesanan
+        submitOrder() {
+            fetch("{{ route('waiter.orders.store') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    _token: "{{ csrf_token() }}",
+                    menus: this.selectedMenus.map(m => ({ id: m.id, quantity: m.quantity }))
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                window.location.href = "{{ route('waiter.orders.index') }}";
+            })
+            .catch(error => console.error("Error:", error));
         }
-    });
-
-    document.getElementById("menuSearch").addEventListener("keydown", function (e) {
-        let list = document.getElementById("menuList");
-        let items = list.getElementsByTagName("li");
-
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            if (!isEditingQuantity) {
-                currentFocus++;
-                if (currentFocus >= items.length) currentFocus = 0;
-                setActive(items);
-            }
-        } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            if (!isEditingQuantity) {
-                currentFocus--;
-                if (currentFocus < 0) currentFocus = items.length - 1;
-                setActive(items);
-            }
-        } else if (e.key === "Enter") {
-            e.preventDefault();
-            if (!isEditingQuantity && currentFocus > -1) {
-                items[currentFocus].click(); // Pilih menu
-            } else if (isEditingQuantity) {
-                // Keluar dari mode edit quantity
-                isEditingQuantity = false;
-                document.getElementById("menuSearch").focus();
-            }
-        }
-    });
-
-    function setActive(items) {
-        if (!items.length) return false;
-        removeActive(items);
-        if (currentFocus >= items.length) currentFocus = 0;
-        if (currentFocus < 0) currentFocus = (items.length - 1);
-        items[currentFocus].classList.add("active");
-    }
-
-    function removeActive(items) {
-        for (let i = 0; i < items.length; i++) {
-            items[i].classList.remove("active");
-        }
-    }
-
-    function addMenuToOrder(menu) {
-        if (selectedMenus.find(m => m.id === menu.id)) return;
-
-        selectedMenus.push({ id: menu.id, name: menu.name, quantity: 1 });
-
-        let row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${menu.name}</td>
-            <td><input type="number" name="menus[${menu.id}][quantity]" value="1" min="1" class="form-control qty-input"></td>
-            <td><button type="button" class="btn btn-danger btn-sm remove-item">Hapus</button></td>
-        `;
-
-        let qtyInput = row.querySelector(".qty-input");
-        let removeButton = row.querySelector(".remove-item");
-
-        // Fokus ke input quantity saat item ditambahkan
-        qtyInput.focus();
-        isEditingQuantity = true;
-
-        // Handle perubahan quantity dengan keyboard
-        qtyInput.addEventListener("keydown", function (e) {
-            if (e.key === "ArrowUp") {
-                e.preventDefault();
-                this.value = parseInt(this.value) + 1;
-            } else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                this.value = Math.max(1, parseInt(this.value) - 1);
-            } else if (e.key === "Enter") {
-                e.preventDefault();
-                isEditingQuantity = false;
-                document.getElementById("menuSearch").focus(); // Kembali ke pencarian
-            }
-        });
-
-        // Handle perubahan quantity secara manual
-        qtyInput.addEventListener("change", function () {
-            let menuIndex = selectedMenus.findIndex(m => m.id === menu.id);
-            selectedMenus[menuIndex].quantity = parseInt(this.value);
-        });
-
-        // Handle penghapusan item
-        removeButton.addEventListener("click", function () {
-            selectedMenus = selectedMenus.filter(m => m.id !== menu.id);
-            row.remove();
-        });
-
-        document.getElementById("orderItems").appendChild(row);
-        document.getElementById("menuSearch").value = "";
-        document.getElementById("menuList").innerHTML = "";
-        currentFocus = -1;
-    }
-
-    document.getElementById("orderForm").addEventListener("submit", function (e) {
-        e.preventDefault();
-
-        let formData = {
-            _token: "{{ csrf_token() }}",
-            menus: selectedMenus.map(m => ({ id: m.id, quantity: m.quantity }))
-        };
-
-        fetch("{{ route('waiter.orders.store') }}", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(formData)
-        })
-        .then(response => response.json())
-        .then(data => {
-            alert(data.message);
-            window.location.href = "{{ route('waiter.orders.index') }}";
-        })
-        .catch(error => console.error("Error:", error));
-    });
+    }));
 });
 </script>
 @endsection
