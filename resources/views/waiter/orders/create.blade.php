@@ -189,7 +189,7 @@
             document.addEventListener("keydown", function (e) {
                 if (e.ctrlKey && e.key === "Enter") {
                     e.preventDefault();
-                    submitOrder(); // Panggil fungsi submitOrder saat Ctrl + Enter ditekan
+                    submitOrder(); 
                 }
             });
     
