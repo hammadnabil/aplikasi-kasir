@@ -33,8 +33,8 @@
             let menus = @json($menus);
             let selectedMenus = [];
             let currentFocus = -1;
-            let isEditingOrder = false; // Mode edit daftar pesanan
-            let editIndex = 0; // Indeks item yang sedang diedit
+            let isEditingOrder = false; 
+            let editIndex = 0; 
     
             document.getElementById("menuSearch").focus();
     
